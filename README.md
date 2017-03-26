@@ -19,7 +19,13 @@
 # organization
 
 `data`
-: OSM, chreod/trace, streetnetworks, etc. data
+: OSM, chreod/trace, streetnetworks, etc. data in several directories
+    `osm`
+    : is osm data, in xml
+    `gpx`
+    : is gpx trace files, in xml
+    `traces`
+    : are gpx proced to a tab-delimited format
 
 `src`
 : little scripts and things
