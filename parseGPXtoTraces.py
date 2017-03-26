@@ -11,7 +11,7 @@ for gpxFile in os.listdir(gpxDir):
     gpxRoot = gpxTree.getroot()
     for track in gpxRoot.iter(tgPre+'trk'):
       f = open("./data/traces/"+
-               track.find(tgPre+'name').text+'.tabd','w')
+               track.find(tgPre+'name').text+'.traces','w')
       f.write('lat\tlon\tele\tspeed\ttime\n')
       for trackSegment in track.iter(tgPre+'trkseg'):
         for measuredPoint in trackSegment.getiterator(tgPre+'trkpt'):
