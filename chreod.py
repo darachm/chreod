@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+import argparse # for arguments on the command line
 import os # for opening and closing files
 import xml.etree.ElementTree as ET # need this to read all this xml
 
@@ -7,34 +8,49 @@ from pymongo import MongoClient # using mongoDB
 client = MongoClient() # this gets us a client to the mongodatabase
                        # make sure to start mongod somewhere, aim at
                        # some custom folder
-if 0: # for debugging, this just drops the named database, here
-      # that's test
-  client.drop_database('test')
 
-# read in command line arguments
-# 
+argparser = argparse.ArgumentParser(description='the chreod thingy')
+argparser.add_argument('--parseOSM',dest='runMode',
+  action='store_const',const='parseOSM', 
+  default='help',help='parse OSM to mongodb')
+argparser.add_argument('--plotWayNodes',dest='runMode',
+  action='store_const',const='plotWayNodes', 
+  default='help',help='parse OSM to mongodb')
+argparser.add_argument('--dropDB',dest='dropDB',
+  action='store_const',const=True, 
+  default=False,help='should I drop test database?')
+args = argparser.parse_args()
+#if bool(args.runMode=='help') and not args.dropDB:
+#  argparser.print_help()
 
 import numpy as np
 import matplotlib.pyplot as plt
 
+if args.dropDB: # for debugging, this just drops the named database, 
+# here that's test
+  client.drop_database('test')
+  print('Dropped db test')
+
 def main():
   nameOfDatabase = 'test'
-  if 1:
+  if args.runMode == 'parseOSM':
     osmDir = './data/osm/'
     for osmFile in os.listdir(osmDir):
       if osmFile.endswith('.osm'):
         parseOSMtoMongoDB(osmDir+osmFile,nameOfDatabase)
 # next plots points of each wayByNodes
-  if 0:
-    for eachWay in client[nameOfDatabase].waysByNodes.find():
+  if args.runMode == 'plotWayNodes':
+    for eachWay in client[nameOfDatabase].namedWays.find():
       exs, why = [],[]
-      for eachNodeID in eachWay['ndz']:
-        for eachNodeInWay in client[nameOfDatabase].nodes.find({'id':eachNodeID}):
-          exs.append(float(eachNodeInWay['lon']))
-          why.append(float(eachNodeInWay['lat']))
+      try:
+        for eachNodeID in eachWay['ndz']:
+          for eachNodeInWay in client[nameOfDatabase].nodes.find({'id':eachNodeID}):
+            exs.append(float(eachNodeInWay['lon']))
+            why.append(float(eachNodeInWay['lat']))
+      except:
+        None
       plt.plot(exs,why,marker='o')
     plt.show()
-
 
 def parseOSMtoMongoDB(osmFilePath,databaseName): 
 # this function should take a path to an osm, read it all in, 
@@ -42,7 +58,7 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
   db = client[databaseName] # this creates the database
   nodes = db.nodes # this opens the nodes collection
   waysByNodes = db.waysByNodes # this opens a collection of ways
-                               # as they are read in
+    # as they are read in
   db.nodes.create_index( 'id',unique=True )
   db.waysByNodes.create_index( 'id',unique=True )
   for event, elem in ET.iterparse(osmFilePath):
@@ -76,7 +92,8 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
     str(db.waysByNodes.count())+" ways")
 # test just to see if we got one, and only one
   for i in waysByNodes.find({'name':'Navy Street'}):
-    print(i)
+    #print(i)
+    None
 # give each node the name of the way it's a member of
   for eachWayByNodes in waysByNodes.find({}):
     for eachNodeIDInWay in eachWayByNodes['ndz']:
@@ -88,7 +105,15 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
   for eachNode in nodes.find({}):
     try:
       eachNode['uniqueWayParents'] = set(eachNode['wayParent'])
-      print(eachNode['uniqueWayParents'])
+    except:
+      None
+  namedWays = db.namedWays # this opens a collection of named ways
+  db.namedWays.create_index( 'name',unique=True )
+  for eachNode in nodes.find():
+    try:
+      for eachParentWay in set(eachNode['wayParent']):
+        namedWays.find_one_and_update({'name':eachParentWay},
+          {'$push':{'ndz':eachNode['id']}},upsert=True) 
     except:
       None
   #intersections = db.intersections
@@ -127,44 +152,29 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
   #
 ### } parseOSM
 
-def parseGPX():
-  tgPre = "{http://www.topografix.com/GPX/1/0}"
-  gpxDir = "./data/gpx/"
+# for this one, wait and figure out how to do numpy
+tagPre = "{http://www.topografix.com/GPX/1/0}"
+gpxDir = "./data/gpx/"
+#parseGPX(gpxDir,tagPre)
+def parseGPX(gpxDir,tagPre):
   for gpxFile in os.listdir(gpxDir):
     if gpxFile.endswith(".gpx"):
       gpxTree = ET.parse(gpxDir+gpxFile)
       gpxRoot = gpxTree.getroot()
-      for track in gpxRoot.iter(tgPre+'trk'):
-        f = open("./data/traces/"+
-                 track.find(tgPre+'name').text+'.traces','w')
-        f.write('lat\tlon\tele\tspeed\ttime\n')
-        for trackSegment in track.iter(tgPre+'trkseg'):
-          for measuredPoint in trackSegment.getiterator(tgPre+'trkpt'):
+      for track in gpxRoot.iter(tagPre+'trk'):
+#        f = open("./data/traces/"+
+#                 track.find(tagPre+'name').text+'.traces','w')
+#        f.write('lat\tlon\tele\tspeed\ttime\n')
+        for trackSegment in track.iter(tagPre+'trkseg'):
+          for measuredPoint in trackSegment.getiterator(tagPre+'trkpt'):
             f.write(measuredPoint.get('lat')+'\t'+
                   measuredPoint.get('lon')+'\t'+
-                  measuredPoint.find(tgPre+'ele').text+'\t'+
-                  measuredPoint.find(tgPre+'speed').text+'\t'+
-                  measuredPoint.find(tgPre+'time').text+'\n'
+                  measuredPoint.find(tagPre+'ele').text+'\t'+
+                  measuredPoint.find(tagPre+'speed').text+'\t'+
+                  measuredPoint.find(tagPre+'time').text+'\n'
                  )
         f.close()
 
-
-def plotTraces():
-  import numpy as np
-  import matplotlib.pyplot as plt
-#  traceDir = "./data/traces/"
-#  for traceFile in os.listdir(traceDir):
-#    if traceFile.endswith(".traces"):
-#      exs = []
-#      why = []
-#      f = open(traceDir+traceFile,'r')
-#      print(f.readline())
-#      for line in f:
-#        lineList = line.split()
-#        exs.append(float(lineList[1]))
-#        why.append(float(lineList[0]))
-#      plt.plot(exs,why)
-#  plt.show()
   
 
 if __name__ == '__main__': # bit from stackoverflow answer
