@@ -103,3 +103,45 @@ if 1: # for updating nodes with streets
 #               )
 #      f.close()
 #
+
+
+tgPre = "{http://www.topografix.com/GPX/1/0}"
+gpxDir = "./data/gpx/"
+for gpxFile in os.listdir(gpxDir):
+  if gpxFile.endswith(".gpx"):
+    gpxTree = ET.parse(gpxDir+gpxFile)
+    gpxRoot = gpxTree.getroot()
+    for track in gpxRoot.iter(tgPre+'trk'):
+      f = open("./data/traces/"+
+               track.find(tgPre+'name').text+'.traces','w')
+      f.write('lat\tlon\tele\tspeed\ttime\n')
+      for trackSegment in track.iter(tgPre+'trkseg'):
+        for measuredPoint in trackSegment.getiterator(tgPre+'trkpt'):
+          f.write(measuredPoint.get('lat')+'\t'+
+                measuredPoint.get('lon')+'\t'+
+                measuredPoint.find(tgPre+'ele').text+'\t'+
+                measuredPoint.find(tgPre+'speed').text+'\t'+
+                measuredPoint.find(tgPre+'time').text+'\n'
+               )
+      f.close()
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+traceDir = "./data/traces/"
+for traceFile in os.listdir(traceDir):
+  if traceFile.endswith(".traces"):
+    exs = []
+    why = []
+    f = open(traceDir+traceFile,'r')
+    print(f.readline())
+    for line in f:
+      lineList = line.split()
+      exs.append(float(lineList[1]))
+      why.append(float(lineList[0]))
+    plt.plot(exs,why)
+
+plt.show()
+
+
