@@ -10,12 +10,12 @@ client = MongoClient() # this gets us a client to the mongodatabase
                        # some custom folder
 
 argparser = argparse.ArgumentParser(description='the chreod thingy')
-argparser.add_argument('--parseOSM',dest='runMode',
-  action='store_const',const='parseOSM', 
-  default='help',help='parse OSM to mongodb')
-argparser.add_argument('--plotWayNodes',dest='runMode',
-  action='store_const',const='plotWayNodes', 
-  default='help',help='parse OSM to mongodb')
+argparser.add_argument('--parseOSM',dest='parseOSM',
+  action='store_const',const=True, 
+  default=False,help='parse OSM to mongodb?')
+argparser.add_argument('--plotDiag',dest='plotDiagnostic',
+  action='store_const',const=True, 
+  default=False,help='should I make a diagnostic plot?')
 argparser.add_argument('--dropDB',dest='dropDB',
   action='store_const',const=True, 
   default=False,help='should I drop test database?')
@@ -33,13 +33,13 @@ if args.dropDB: # for debugging, this just drops the named database,
 
 def main():
   nameOfDatabase = 'test'
-  if args.runMode == 'parseOSM':
+  if args.parseOSM:
     osmDir = './data/osm/'
     for osmFile in os.listdir(osmDir):
       if osmFile.endswith('.osm'):
         parseOSMtoMongoDB(osmDir+osmFile,nameOfDatabase)
 # next plots points of each wayByNodes
-  if args.runMode == 'plotWayNodes':
+  if args.plotDiagnostic:
     for eachWay in client[nameOfDatabase].namedWays.find():
       exs, why = [],[]
       try:
@@ -53,90 +53,89 @@ def main():
     plt.show()
 
 def parseOSMtoMongoDB(osmFilePath,databaseName): 
-# this function should take a path to an osm, read it all in, 
-# store it as collections, and return the names of those?
+    # this function should take a path to an osm, read it all in, 
+    # store it as collections, and return the names of those?
   db = client[databaseName] # this creates the database
   nodes = db.nodes # this opens the nodes collection
-  waysByNodes = db.waysByNodes # this opens a collection of ways
+  ways = db.ways # this opens a collection of ways
     # as they are read in
-  db.nodes.create_index( 'id',unique=True )
-  db.waysByNodes.create_index( 'id',unique=True )
-  for event, elem in ET.iterparse(osmFilePath):
-    if elem.tag == 'node':
-      for subelem in elem.findall('tag'):
-        if subelem.attrib['k']=='highway':
-          try:
+  db.nodes.create_index( 'id',unique=True ) # this makes an index
+  db.ways.create_index( 'id',unique=True ) # so that it's unique by id
+  print("Parsing XML to nodes and ways")
+  for event, elem in ET.iterparse(osmFilePath): # open xml as iter
+    if elem.tag == 'node': # we only want the nodes...
+      for subelem in elem.findall('tag'): # ...that are tagged...
+        if subelem.attrib['k']=='highway': # ...as highway nodes.
+          try: # this is to catch any weird errors, nodes w/ lat lon
             nodes.insert_one({'id':elem.attrib['id'],
               'lon':float(elem.attrib['lon']),
               'lat':float(elem.attrib['lat'])})
           except:
             1
-    if elem.tag == 'way':
-      thisName, thisHighway = '',''
-      for z in elem.findall('tag'):
-        if z.attrib['k']=='name':
+    if elem.tag == 'way': # next, ways
+      thisName, thisHighway = '','' # make these blank
+      for z in elem.findall('tag'): # for all tags...
+        if z.attrib['k']=='name': # grab the way name
           thisName = z.attrib['v']
-        if z.attrib['k']=='highway':
+        if z.attrib['k']=='highway': # and if it's a highway
           thisHighway = z.attrib['v']
-      if thisHighway != '':
-        wayNodes = []
-        for z in elem.findall('nd'):
-          wayNodes.append(z.attrib['ref'])
-        try:
-          waysByNodes.insert_one({'id':elem.attrib['id'],
-            'ndz':wayNodes,'name':thisName,'highway':thisHighway})
+      if thisHighway != '': # if it's a highway
+        wayNodes = [] # init
+        for z in elem.findall('nd'): # for all nodes in the way,
+          # and that's in order of the document
+          wayNodes.append(z.attrib['ref']) # append in order
+          nodes.find_one_and_update({'id':z.attrib['ref']},
+            {'$push':{'parentWays':elem.attrib['id']}}) 
+        try: # to catch things without defined hash
+          ways.insert_one({'id':elem.attrib['id'],'label':None,
+            'childNodes':wayNodes,
+            'name':thisName,'highway':thisHighway})
         except:
           1
-# now we've got our two collections open, how many do we have?
-  print("Read in "+str(db.nodes.count())+" nodes and "+
-    str(db.waysByNodes.count())+" ways")
-# test just to see if we got one, and only one
-  for i in waysByNodes.find({'name':'Navy Street'}):
-    #print(i)
-    None
-# give each node the name of the way it's a member of
-  for eachWayByNodes in waysByNodes.find({}):
-    for eachNodeIDInWay in eachWayByNodes['ndz']:
-      nodes.find_one_and_update({'id':eachNodeIDInWay},
-        {'$push':{'wayParent':eachWayByNodes['name']}}) 
-# the below is just to make a unique set of names, but that might
-# be problematic, because what if there's some kind of loop, how
-# do a preserve order around curves?
-  for eachNode in nodes.find({}):
-    try:
-      eachNode['uniqueWayParents'] = set(eachNode['wayParent'])
-    except:
-      None
-  namedWays = db.namedWays # this opens a collection of named ways
-  db.namedWays.create_index( 'name',unique=True )
-  for eachNode in nodes.find():
-    try:
-      for eachParentWay in set(eachNode['wayParent']):
-        namedWays.find_one_and_update({'name':eachParentWay},
-          {'$push':{'ndz':eachNode['id']}},upsert=True) 
-    except:
-      None
-  #intersections = db.intersections
-  #db.intersections.create_index( 'id',unique=True )
-  #if 1: # for making intersections of ways
-  #  for i in #eachway:
-  #    #add to node's hash, key id and value name 
-  #  for i in #each node hash
-  #    #if it's intersecting with itself, then merge the two as a new
-  #    #  document with longer id1+id2
-  #    #if in multiple roads, then add the intersection to an array of
-  #    #  these for each way
-  #
-  #
-  #waysByNodes = db.waysByNodes
-  #db.waysByNodes.create_index( 'id',unique=True )
-  #if 1: # for making ways
-  #  for i in waysByNodes.find({'name':'Flushing Avenue'}):
-  #    
-  #        waysByNodes[elem.attrib['id']] = [elem.attrib['lon'],
-  #                                    elem.attrib['lat']]
-  
-  
+
+  print("Read in "+str(db.nodes.count())+" nodes and "+ 
+    str(db.ways.count())+" ways") # now we've got our two 
+      # collections open, how many do we have?
+
+    # here we connect all nodes that connect to each other
+  print("Connecting all nodes in ways")
+  for eachWay in ways.find({}):
+    if len(eachWay['childNodes']) > 1:
+      for listIndex in range(0,len(eachWay['childNodes'])):
+        if listIndex == 0:
+          nodes.find_one_and_update(
+            {'id': eachWay['childNodes'][listIndex]},
+            {'$push':
+              {'nextNode':eachWay['childNodes'][listIndex+1]}
+            }) 
+        elif listIndex == len(eachWay['childNodes'])-1:
+          nodes.find_one_and_update(
+            {'id': eachWay['childNodes'][listIndex]},
+            {'$push':
+              {'prevNode':eachWay['childNodes'][listIndex-1]}
+            }) 
+        else:
+          nodes.find_one_and_update(
+            {'id': eachWay['childNodes'][listIndex]},
+            {'$push':
+              {'nextNode':eachWay['childNodes'][listIndex+1]},
+            }) 
+          nodes.find_one_and_update(
+            {'id': eachWay['childNodes'][listIndex]},
+            {'$push':
+              {'prevNode':eachWay['childNodes'][listIndex-1]},
+            }) 
+
+    # id connected segments, propogate labels
+#ERRORS
+  for eachWay in ways.find():
+    if eachWay['label'] == None:
+      eachWay['label'] = eachWay['id']
+    for eachNodeInWay in eachWay['childNodes']:
+      for parentWayID in eachNodeInWay['parentWays']:
+        parentWay = ways.find_one({'id':parentWayID})
+        if parentWay['label'] == None:
+          parentWay['label'] == eachway['label']
   #      f = open('./data/traces/'+
   #               track.find(tgPre+'name').text+'.traces','w')
   #      f.write('lat\tlon\tele\tspeed\ttime\n')
@@ -149,7 +148,7 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
   #                measuredPoint.find(tgPre+'time').text+'\n'
   #               )
   #      f.close()
-  #
+# make sure to convert lat lon to meters when done, updating all OSM
 ### } parseOSM
 
 # for this one, wait and figure out how to do numpy
