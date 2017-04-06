@@ -3,19 +3,34 @@
 import argparse # for arguments on the command line
 import os # for opening and closing files
 import xml.etree.ElementTree as ET # need this to read all this xml
+import sys # for simply exiting
 
 from pymongo import MongoClient # using mongoDB
 client = MongoClient() # this gets us a client to the mongodatabase
                        # make sure to start mongod somewhere, aim at
                        # some custom folder
 
-argparser = argparse.ArgumentParser(description='the chreod thingy')
+argparser = argparse.ArgumentParser(description='\
+The chreod thingy. Takes maps, traces, and turns them into a \
+database that we can use to start looking at travel times through \
+network.')
+
 argparser.add_argument('--parseOSM',dest='parseOSM',
-  action='store_const',const=True, 
-  default=False,help='parse OSM to mongodb?')
+  action='store_const',const=True,default=False,
+  help='--parseOSM Read in ./data/osm files stick them in a mongodb,\
+    but only if not already defined by OSM node/way ID.')
+argparser.add_argument('--parseGPX',dest='parseGPX',
+  action='store_const',const=True,default=False,
+  help='--parseGPX Read in ./data/GPX files stick them in a mongodb,\
+    but only if not already defined by traveler:date-time')
+argparser.add_argument('--connectOSM',dest='connectOSM',
+  action='store_const',const=True,default=False,
+  help='--connectOSM This takes the OSM data, uses ways (later \
+    proximity) to detect node connections, and labels network \
+    segments.')
 argparser.add_argument('--plotDiag',dest='plotDiagnostic',
   action='store_const',const=True, 
-  default=False,help='should I make a diagnostic plot?')
+  default=False,help='should I make a diagnostic plot? nodes, groupd and colored by segments')
 argparser.add_argument('--dropDB',dest='dropDB',
   action='store_const',const=True, 
   default=False,help='should I drop test database?')
@@ -38,6 +53,8 @@ def main():
     for osmFile in os.listdir(osmDir):
       if osmFile.endswith('.osm'):
         parseOSMtoMongoDB(osmDir+osmFile,nameOfDatabase)
+  if args.connectOSM:
+    connectOSM(nameOfDatabase)
 # next plots points of each wayByNodes
   if args.plotDiagnostic:
     for eachWay in client[nameOfDatabase].namedWays.find():
@@ -52,16 +69,17 @@ def main():
       plt.plot(exs,why,marker='o')
     plt.show()
 
+####DOES THIS ACTUALLY OVERWRITE THE DATABASE?
 def parseOSMtoMongoDB(osmFilePath,databaseName): 
     # this function should take a path to an osm, read it all in, 
     # store it as collections, and return the names of those?
-  db = client[databaseName] # this creates the database
-  nodes = db.nodes # this opens the nodes collection
-  ways = db.ways # this opens a collection of ways
+  db = client[databaseName] # this accesses the database
+  nodes = db.nodes # this opens the nodes collection, new if not there
+  ways = db.ways # this opens a collection of ways, new if not there,
     # as they are read in
-  db.nodes.create_index( 'id',unique=True ) # this makes an index
-  db.ways.create_index( 'id',unique=True ) # so that it's unique by id
-  print("Parsing XML to nodes and ways")
+  db.nodes.create_index('id',unique=True) # this makes an index
+  db.ways.create_index('id',unique=True) # so that it's unique by id
+  print("Parsing OSM XML to nodes and ways")
   for event, elem in ET.iterparse(osmFilePath): # open xml as iter
     if elem.tag == 'node': # we only want the nodes...
       for subelem in elem.findall('tag'): # ...that are tagged...
@@ -69,7 +87,8 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
           try: # this is to catch any weird errors, nodes w/ lat lon
             nodes.insert_one({'id':elem.attrib['id'],
               'lon':float(elem.attrib['lon']),
-              'lat':float(elem.attrib['lat'])})
+              'lat':float(elem.attrib['lat']),
+              'label':None,'nextNode':[],'prevNode':[]})
           except:
             1
     if elem.tag == 'way': # next, ways
@@ -92,17 +111,22 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
             'name':thisName,'highway':thisHighway})
         except:
           1
-
   print("Read in "+str(db.nodes.count())+" nodes and "+ 
     str(db.ways.count())+" ways") # now we've got our two 
       # collections open, how many do we have?
 
-    # here we connect all nodes that connect to each other
+def connectOSM(databaseName): 
+    # this function should connect all the nodes
+  db = client[databaseName] # this accesses the database
+  nodes = db.nodes # this opens the nodes collection
+  ways = db.ways # this opens a collection of ways
+#TEST IF THEY EXIST
   print("Connecting all nodes in ways")
   for eachWay in ways.find({}):
     if len(eachWay['childNodes']) > 1:
       for listIndex in range(0,len(eachWay['childNodes'])):
         if listIndex == 0:
+#IMPLEMENT SOME WAY OF UNIQUIFYING THESE, SO NO REDUNDANCY OF NEXT OR PREVIOUS NODES
           nodes.find_one_and_update(
             {'id': eachWay['childNodes'][listIndex]},
             {'$push':
@@ -127,27 +151,24 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
             }) 
 
     # id connected segments, propogate labels
-#ERRORS
-  for eachWay in ways.find():
-    if eachWay['label'] == None:
-      eachWay['label'] = eachWay['id']
-    for eachNodeInWay in eachWay['childNodes']:
-      for parentWayID in eachNodeInWay['parentWays']:
-        parentWay = ways.find_one({'id':parentWayID})
-        if parentWay['label'] == None:
-          parentWay['label'] == eachway['label']
-  #      f = open('./data/traces/'+
-  #               track.find(tgPre+'name').text+'.traces','w')
-  #      f.write('lat\tlon\tele\tspeed\ttime\n')
-  #      for trackSegment in track.iter(tgPre+'trkseg'):
-  #        for measuredPoint in trackSegment.getiterator(tgPre+'trkpt'):
-  #          f.write(measuredPoint.get('lat')+'\t'+
-  #                measuredPoint.get('lon')+'\t'+
-  #                measuredPoint.find(tgPre+'ele').text+'\t'+
-  #                measuredPoint.find(tgPre+'speed').text+'\t'+
-  #                measuredPoint.find(tgPre+'time').text+'\n'
-  #               )
-  #      f.close()
+  def propogateLabel(aNode,aLabel=None):
+    if aNode['label'] != None:
+      return
+    if aNode['label'] == None:
+      if aLabel == None:
+        aNode['label'] = aNode['id']
+      else:
+        aNode['label'] = aLabel
+    for eachNextNode in set(aNode['nextNode']):
+      None
+      print(nodes.find_one({'id':eachNextNode}))
+#        propogateLabel(nodes.find_one({'id':eachNextNode}))
+#        print(aNode['label'])
+#    print(aNode)
+
+  for eachNode in nodes.find():
+    propogateLabel(eachNode)
+    
 # make sure to convert lat lon to meters when done, updating all OSM
 ### } parseOSM
 

@@ -3,9 +3,6 @@
 
 # plan
 
-- get a copy of some sort of trace data
-- figure a better format for chreod data, maybe just tab delim
-- write utility for converting
 
 - figure and grab osm data subset for new york
 - figure specification for street network, intersections as nodes,
