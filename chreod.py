@@ -28,6 +28,9 @@ argparser.add_argument('--connectOSM',dest='connectOSM',
   help='--connectOSM This takes the OSM data, uses ways (later \
     proximity) to detect node connections, and labels network \
     segments.')
+argparser.add_argument('--propogateLabels',dest='propogateLabels',
+  action='store_const',const=True,default=False,
+  help='--propogateLabels')
 argparser.add_argument('--plotDiag',dest='plotDiagnostic',
   action='store_const',const=True, 
   default=False,help='should I make a diagnostic plot? nodes, groupd and colored by segments')
@@ -55,15 +58,18 @@ def main():
         parseOSMtoMongoDB(osmDir+osmFile,nameOfDatabase)
   if args.connectOSM:
     connectOSM(nameOfDatabase)
+  if args.propogateLabels:
+    propogateLabels(nameOfDatabase)
 # next plots points of each wayByNodes
   if args.plotDiagnostic:
-    for eachWay in client[nameOfDatabase].namedWays.find():
+    for eachNode in client[nameOfDatabase].nodes.find({'labelPropogated':True}):
       exs, why = [],[]
       try:
-        for eachNodeID in eachWay['ndz']:
-          for eachNodeInWay in client[nameOfDatabase].nodes.find({'id':eachNodeID}):
-            exs.append(float(eachNodeInWay['lon']))
-            why.append(float(eachNodeInWay['lat']))
+        print(eachNode)
+        for eachSubNode in client[nameOfDatabase].nodes.find({'label':eachNode['id']}):
+          print(eachSubNode)
+          exs.append(float(eachSubNode['lon']))
+          why.append(float(eachSubNode['lat']))
       except:
         None
       plt.plot(exs,why,marker='o')
@@ -88,7 +94,8 @@ def parseOSMtoMongoDB(osmFilePath,databaseName):
             nodes.insert_one({'id':elem.attrib['id'],
               'lon':float(elem.attrib['lon']),
               'lat':float(elem.attrib['lat']),
-              'label':None,'nextNode':[],'prevNode':[]})
+              'label':None,'labelPropogated':False,
+              'nextNode':[],'prevNode':[]})
           except:
             1
     if elem.tag == 'way': # next, ways
@@ -150,24 +157,53 @@ def connectOSM(databaseName):
               {'prevNode':eachWay['childNodes'][listIndex-1]},
             }) 
 
-    # id connected segments, propogate labels
-  def propogateLabel(aNode,aLabel=None):
-    if aNode['label'] != None:
-      return
-    if aNode['label'] == None:
-      if aLabel == None:
-        aNode['label'] = aNode['id']
-      else:
-        aNode['label'] = aLabel
-    for eachNextNode in set(aNode['nextNode']):
-      None
-      print(nodes.find_one({'id':eachNextNode}))
-#        propogateLabel(nodes.find_one({'id':eachNextNode}))
-#        print(aNode['label'])
-#    print(aNode)
 
+def propogateLabels(databaseName): 
+    # this function propogate labels
+  db = client[databaseName] # this accesses the database
+  nodes = db.nodes # this opens the nodes collection
+  ways = db.ways # this opens a collection of ways
+#TEST IF THEY EXIST
+  print("Propogating labels between nodes in database, to identify\
+    connected components")
   for eachNode in nodes.find():
-    propogateLabel(eachNode)
+    nodes.update_one({'id':eachNode['id']},{'$set':{'label':None}})
+#  for eachNode in nodes.find():
+#    print(eachNode['label'])
+  for eachNode in nodes.find():
+    try:
+      if eachNode['label'] != None:
+        continue 
+    except:
+      continue
+    currentLabel = eachNode['id']
+#    nodes.update_one({'id':eachNode['id']},
+#      {'$set':{'label':currentLabel}})
+    labelingQueue = [eachNode['id']]
+    while len(labelingQueue) > 0:
+#      print(labelingQueue)
+      currentNode = nodes.find_one({'id':labelingQueue.pop()})
+      neighborIDList = currentNode['nextNode']+currentNode['prevNode']
+#      print(neighborIDList)
+      for neighborNodeID in set(neighborIDList):
+        neighborNode = nodes.find_one({'id':neighborNodeID})
+#        print(neighborNode)
+        try:
+          if neighborNode['label'] == None:
+            nodes.update_one({'id':neighborNodeID},
+              {'$set':{'label':currentLabel}})
+            print(currentLabel)
+            labelingQueue.append(neighborNode['id'])
+            print(labelingQueue)
+          else:
+            continue
+        except:
+          continue
+#      print()
+  for eachNode in nodes.find():
+    pass#print(eachNode)
+      
+  
     
 # make sure to convert lat lon to meters when done, updating all OSM
 ### } parseOSM
