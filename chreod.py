@@ -62,20 +62,32 @@ def main():
     propogateLabels(nameOfDatabase)
 # next plots points of each wayByNodes
   if args.plotDiagnostic:
-    for eachNode in client[nameOfDatabase].nodes.find({'labelPropogated':True}):
-      exs, why = [],[]
-      try:
-        print(eachNode)
-        for eachSubNode in client[nameOfDatabase].nodes.find({'label':eachNode['id']}):
-          print(eachSubNode)
-          exs.append(float(eachSubNode['lon']))
-          why.append(float(eachSubNode['lat']))
-      except:
-        None
+    print("gonna try to plot diagnostic by label")
+    allLabels = set()
+    for eachNode in client[nameOfDatabase].nodes.find():
+      allLabels.add(eachNode['label'])
+#THIS IS SET TO DIAGNOSE
+    for eachLabel in [15]:#range(16,16):#allLabels:
+      for eachNode in client[nameOfDatabase].nodes.find({'label':eachLabel}):
+        exs, why, nextNodez = [],[],[]
+        try:
+          exs.append(float(eachNode['lon']))
+          why.append(float(eachNode['lat']))
+#THIS IS BUSTED, I SHOULD LEARN NUMPY SO I CAN PLOT THESE
+#LINE SEGMENTS BY COLOR TO DIAGNOSE WHT THE COLOR LABEL THING
+#AIN'T WORKING
+          for eachSubNodeID in eachNode['nextNode']:
+            eachSubNodeID.find_one({'id',eachSubNodeID})
+            nextNodez.append((eachSubNodeID['lon'],
+              eachSubNodeID['lat']))
+        except:
+          None
+        print(nextNodez)
       plt.plot(exs,why,marker='o')
     plt.show()
 
-####DOES THIS ACTUALLY OVERWRITE THE DATABASE?
+###DOES THIS ACTUALLY OVERWRITE THE DATABASE?
+###REWRITE TO USE BULK INSERTS
 def parseOSMtoMongoDB(osmFilePath,databaseName): 
     # this function should take a path to an osm, read it all in, 
     # store it as collections, and return the names of those?
@@ -166,42 +178,39 @@ def propogateLabels(databaseName):
 #TEST IF THEY EXIST
   print("Propogating labels between nodes in database, to identify\
     connected components")
-  for eachNode in nodes.find():
-    nodes.update_one({'id':eachNode['id']},{'$set':{'label':None}})
+  nodes.update_many({},{'$set':{'label':None}})
 #  for eachNode in nodes.find():
 #    print(eachNode['label'])
+  counter = 1
   for eachNode in nodes.find():
     try:
-      if eachNode['label'] != None:
+      if nodes.find_one({'id':eachNode['id']})['label'] != None:
         continue 
     except:
       continue
-    currentLabel = eachNode['id']
-#    nodes.update_one({'id':eachNode['id']},
-#      {'$set':{'label':currentLabel}})
+    currentLabel = counter#eachNode['id']
+    counter += 1
+    nodes.update_one({'id':eachNode['id']},
+      {'$set':{'label':currentLabel}})
     labelingQueue = [eachNode['id']]
     while len(labelingQueue) > 0:
 #      print(labelingQueue)
-      currentNode = nodes.find_one({'id':labelingQueue.pop()})
-      neighborIDList = currentNode['nextNode']+currentNode['prevNode']
+      currentNodeID = nodes.find_one({'id':labelingQueue.pop()})['id']
+      neighborIDList = nodes.find_one({'id':currentNodeID})['nextNode']+nodes.find_one({'id':currentNodeID})['prevNode']
 #      print(neighborIDList)
       for neighborNodeID in set(neighborIDList):
-        neighborNode = nodes.find_one({'id':neighborNodeID})
-#        print(neighborNode)
         try:
-          if neighborNode['label'] == None:
+          if nodes.find_one({'id':neighborNodeID})['label'] == None:
             nodes.update_one({'id':neighborNodeID},
               {'$set':{'label':currentLabel}})
-            print(currentLabel)
-            labelingQueue.append(neighborNode['id'])
-            print(labelingQueue)
+            labelingQueue.append(neighborNodeID)
           else:
             continue
         except:
           continue
 #      print()
-  for eachNode in nodes.find():
-    pass#print(eachNode)
+#  for eachNode in nodes.find():
+#    print(eachNode['label'])#['id']+" "+eachNode['label'])
       
   
     
